@@ -23,8 +23,8 @@ func cetakBanner() {
  |_|    |_|   | |_| | |_| ||_|    
                \__,_|\___/        
 
- [ ADVANCED GO WEB FUZZER ENGINE v2.1 ]
- Author: sdev (2026)
+ [ ADVANCED GO WEB FUZZER ENGINE v2.2 ]
+ Author: sdev (2026) - Full Scan Mode
 ============================================`
 	fmt.Println(banner)
 }
@@ -33,7 +33,7 @@ func simpanCrash(payload string, iterasi uint64, msg string) {
 	file, err := os.OpenFile("crash_report.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
 		defer file.Close()
-		fmt.Fprintf(file, "[!] ANOMALI DETECTED\nIterasi: %d\nPayload: %s\nDetail: %s\n----------------\n", iterasi, payload, msg)
+		fmt.Fprintf(file, "[!] ANOMALI DETECTED | Iterasi: %d | Payload: %s | Detail: %s\n", iterasi, payload, msg)
 	}
 }
 
@@ -77,7 +77,7 @@ func main() {
 	}
 
 	var totalIterasi uint64
-	var berjalan int32 = 1
+	var totalAnomali uint64
 	mulai := time.Now()
 	timeoutDurasi := time.Duration(timeoutSecs) * time.Second
 
@@ -91,14 +91,13 @@ func main() {
 	}
 	client := &http.Client{
 		Transport: tr,
-		Timeout:   5 * time.Second,
+		Timeout:   3 * time.Second, // Timeout dipotong ke 3 detik agar scanning tidak terlalu lama menunggu
 	}
 
 	var wg sync.WaitGroup
 	jumlahThread := 8
 	seedChan := make(chan string, 100)
 
-	// Perbaikan: Mengisi channel di goroutine terpisah agar tidak mengunci (deadlock)
 	go func() {
 		for i := 0; i < len(kamus); i++ {
 			seedChan <- kamus[i]
@@ -118,7 +117,7 @@ func main() {
 			lokalIterasi := 0
 
 			for payload := range seedChan {
-				if atomic.LoadInt32(&berjalan) == 0 || time.Since(mulai) >= timeoutDurasi {
+				if time.Since(mulai) >= timeoutDurasi {
 					return
 				}
 
@@ -133,50 +132,33 @@ func main() {
 
 				respon, err := client.Do(req)
 				if err != nil {
-					if atomic.CompareAndSwapInt32(&berjalan, 1, 0) {
-						durasi := time.Since(mulai)
-						fmt.Printf("\n%s\n", strings.Repeat("!", 50))
-						fmt.Printf("[!] TARGET DOWN / TIMEOUT OLEH THREAD-%d!\n", threadID)
-						fmt.Printf("[!] Total Iterasi Semua Thread : %d\n", iter)
-						fmt.Printf("[!] Payload Pemicu             : %s\n", payload)
-						fmt.Printf("[!] Error                      : %v\n", err)
-						fmt.Printf("[!] Waktu Eksekusi             : %.4f detik\n", durasi.Seconds())
-						fmt.Printf("[*] Menyimpan payload ke \"crash_report.txt\"...\n")
-						fmt.Printf("%s\n", strings.Repeat("!", 50))
-						simpanCrash(payload, iter, "Network Timeout/Target Down")
-						os.Exit(0)
-					}
-					return
+					// Jika timeout, catat tapi JANGAN matikan program (ganti os.Exit dengan continue)
+					atomic.AddUint64(&totalAnomali, 1)
+					fmt.Printf("\n[!] Thread-%d Mendeteksi Timeout pada payload: %s\n", threadID, payload)
+					simpanCrash(payload, iter, "Network Timeout / No Response")
+					continue
 				}
 
 				status := respon.StatusCode
 				respon.Body.Close()
 
 				if status == 500 || status == 403 {
-					if atomic.CompareAndSwapInt32(&berjalan, 1, 0) {
-						durasi := time.Since(mulai)
-						fmt.Printf("\n%s\n", strings.Repeat("!", 50))
-						fmt.Printf("[!] ANOMALI/CRASH DITEMUKAN OLEH THREAD-%d!\n", threadID)
-						fmt.Printf("[!] Total Iterasi Semua Thread : %d\n", iter)
-						fmt.Printf("[!] Payload Pemicu             : %s\n", payload)
-						fmt.Printf("[!] HTTP Status Target         : %d\n", status)
-						fmt.Printf("[!] Waktu Eksekusi             : %.4f detik\n", durasi.Seconds())
-						fmt.Printf("[*] Menyimpan payload ke \"crash_report.txt\"...\n")
-						fmt.Printf("%s\n", strings.Repeat("!", 50))
-						simpanCrash(payload, iter, fmt.Sprintf("HTTP Status %d", status))
-						os.Exit(0)
-					}
-					return
+					atomic.AddUint64(&totalAnomali, 1)
+					fmt.Printf("\n[!] Thread-%d Menemukan Status %d pada payload: %s\n", threadID, status, payload)
+					simpanCrash(payload, iter, fmt.Sprintf("HTTP Status %d", status))
+					continue
 				}
 
 				if threadID == 0 && lokalIterasi%2 == 0 {
 					ops := float64(atomic.LoadUint64(&totalIterasi)) / time.Since(mulai).Seconds()
-					fmt.Printf("[*] Hasil Tes: %d payload | Kecepatan: %.0f exec/sec\r", atomic.LoadUint64(&totalIterasi), ops)
+					fmt.Printf("[*] Hasil Tes: %d payload | Anomali: %d | Speed: %.0f exec/sec\r", atomic.LoadUint64(&totalIterasi), atomic.LoadInt64(&totalAnomali), ops)
 				}
 			}
 		}(tID)
 	}
 
 	wg.Wait()
-	fmt.Printf("\n[*] Selesai. Total Pengujian: %d iterasi.\n", atomic.LoadUint64(&totalIterasi))
+	fmt.Printf("\n\n[*] Selesai! Total Pengujian: %d iterasi.\n", atomic.LoadUint64(&totalIterasi))
+	fmt.Printf("[*] Total Celah/Anomali tercatat: %d item.\n", atomic.LoadUint64(&totalAnomali))
+	fmt.Println("[*] Silakan cek file \"crash_report.txt\" untuk melihat daftar lengkap celah.")
 }
