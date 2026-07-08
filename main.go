@@ -23,7 +23,7 @@ func cetakBanner() {
  |_|    |_|   | |_| | |_| ||_|    
                \__,_|\___/        
 
- [ ADVANCED GO WEB FUZZER ENGINE v2.0 ]
+ [ ADVANCED GO WEB FUZZER ENGINE v2.1 ]
  Author: sdev (2026)
 ============================================`
 	fmt.Println(banner)
@@ -96,17 +96,20 @@ func main() {
 
 	var wg sync.WaitGroup
 	jumlahThread := 8
-	seedChan := make(chan string, len(kamus)*2)
+	seedChan := make(chan string, 100)
 
-	for i := 0; i < len(kamus); i++ {
-		seedChan <- kamus[i]
-		for j := 0; j < len(kamus); j++ {
-			if i != j {
-				seedChan <- kamus[i] + kamus[j]
+	// Perbaikan: Mengisi channel di goroutine terpisah agar tidak mengunci (deadlock)
+	go func() {
+		for i := 0; i < len(kamus); i++ {
+			seedChan <- kamus[i]
+			for j := 0; j < len(kamus); j++ {
+				if i != j {
+					seedChan <- kamus[i] + kamus[j]
+				}
 			}
 		}
-	}
-	close(seedChan)
+		close(seedChan)
+	}()
 
 	for tID := 0; tID < jumlahThread; tID++ {
 		wg.Add(1)
@@ -166,7 +169,7 @@ func main() {
 					return
 				}
 
-				if threadID == 0 && lokalIterasi%10 == 0 {
+				if threadID == 0 && lokalIterasi%2 == 0 {
 					ops := float64(atomic.LoadUint64(&totalIterasi)) / time.Since(mulai).Seconds()
 					fmt.Printf("[*] Hasil Tes: %d payload | Kecepatan: %.0f exec/sec\r", atomic.LoadUint64(&totalIterasi), ops)
 				}
