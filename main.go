@@ -91,7 +91,7 @@ func main() {
 	}
 	client := &http.Client{
 		Transport: tr,
-		Timeout:   3 * time.Second, // Timeout dipotong ke 3 detik agar scanning tidak terlalu lama menunggu
+		Timeout:   3 * time.Second, // Timeout dipotong ke 3 detik agar tidak kelamaan menunggu target macet
 	}
 
 	var wg sync.WaitGroup
@@ -132,7 +132,7 @@ func main() {
 
 				respon, err := client.Do(req)
 				if err != nil {
-					// Jika timeout, catat tapi JANGAN matikan program (ganti os.Exit dengan continue)
+					// Jika timeout, catat anomalinya tapi scan tetap jalan terus
 					atomic.AddUint64(&totalAnomali, 1)
 					fmt.Printf("\n[!] Thread-%d Mendeteksi Timeout pada payload: %s\n", threadID, payload)
 					simpanCrash(payload, iter, "Network Timeout / No Response")
@@ -143,6 +143,7 @@ func main() {
 				respon.Body.Close()
 
 				if status == 500 || status == 403 {
+					// Jika respon status server error, catat dan lanjut scan
 					atomic.AddUint64(&totalAnomali, 1)
 					fmt.Printf("\n[!] Thread-%d Menemukan Status %d pada payload: %s\n", threadID, status, payload)
 					simpanCrash(payload, iter, fmt.Sprintf("HTTP Status %d", status))
@@ -151,7 +152,8 @@ func main() {
 
 				if threadID == 0 && lokalIterasi%2 == 0 {
 					ops := float64(atomic.LoadUint64(&totalIterasi)) / time.Since(mulai).Seconds()
-					fmt.Printf("[*] Hasil Tes: %d payload | Anomali: %d | Speed: %.0f exec/sec\r", atomic.LoadUint64(&totalIterasi), atomic.LoadInt64(&totalAnomali), ops)
+					// FIX: Menggunakan LoadUint64 agar tidak memicu error data type saat kompilasi
+					fmt.Printf("[*] Hasil Tes: %d payload | Anomali: %d | Speed: %.0f exec/sec\r", atomic.LoadUint64(&totalIterasi), atomic.LoadUint64(&totalAnomali), ops)
 				}
 			}
 		}(tID)
